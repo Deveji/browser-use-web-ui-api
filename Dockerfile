@@ -26,6 +26,7 @@ RUN apt-get update && apt-get install -y \
     xdg-utils \
     fonts-liberation \
     dbus \
+    dbus-x11 \
     xauth \
     xvfb \
     x11vnc \
@@ -41,27 +42,44 @@ RUN apt-get update && apt-get install -y \
     fonts-dejavu-extra \
     && rm -rf /var/lib/apt/lists/*
 
+# Setup dbus
+RUN mkdir -p /var/run/dbus \
+    && dbus-uuidgen > /var/lib/dbus/machine-id
+
 # Install noVNC
 RUN git clone https://github.com/novnc/noVNC.git /opt/novnc \
     && git clone https://github.com/novnc/websockify /opt/novnc/utils/websockify \
     && ln -s /opt/novnc/vnc.html /opt/novnc/index.html
 
-# Install Chrome
-RUN curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg \
-    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" | tee /etc/apt/sources.list.d/google-chrome.list
+# Install Chrome based on architecture
+RUN if [ "$(uname -m)" = "x86_64" ]; then \
+        wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | gpg --dearmor > /usr/share/keyrings/google-chrome.gpg \
+        && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" | tee /etc/apt/sources.list.d/google-chrome.list \
+        && apt-get update \
+        && apt-get install -y google-chrome-stable; \
+    else \
+        echo "Non-x86_64 architecture detected, using Chromium instead" \
+        && apt-get update \
+        && apt-get install -y chromium \
+        && ln -s /usr/bin/chromium /usr/bin/google-chrome; \
+    fi \
+    && rm -rf /var/lib/apt/lists/*
 
 # Set up working directory
 WORKDIR /app
 
+# Install Playwright and browsers with system dependencies
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN pip install playwright==1.49.1 \
+    && playwright install --with-deps chromium \
+    && playwright install-deps \
+    && apt-get update \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
 # Copy requirements and install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-
-# Install Playwright and browsers with system dependencies
-ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-RUN playwright install --with-deps chromium
-RUN playwright install-deps
-RUN apt-get install -y google-chrome-stable
 
 # Copy the application code
 COPY . .
@@ -82,6 +100,6 @@ ENV RESOLUTION_HEIGHT=1080
 RUN mkdir -p /var/log/supervisor
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
-EXPOSE 7788 6080 5900
+EXPOSE 7788 7789 6080 5900 9222
 
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]

@@ -4,7 +4,8 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "7788:7788"  # Gradio default port
+      - "7788:7788"  # Gradio UI port
+      - "7789:7789"  # FastAPI port
       - "6080:6080"  # noVNC web interface
       - "5900:5900"  # VNC port
       - "9222:9222"  # Chrome remote debugging port
