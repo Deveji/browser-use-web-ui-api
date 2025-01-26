@@ -33,13 +33,13 @@ class TaskResponse(BaseModel):
 class TaskResult(BaseModel):
     task_id: str
     status: str
-    final_result: Optional[str]
-    errors: Optional[str]
-    model_actions: Optional[str]
-    model_thoughts: Optional[str]
-    recording_path: Optional[str]
-    trace_file: Optional[str]
-    history_file: Optional[str]
+    final_result: Optional[str] = None
+    errors: Optional[str] = None
+    model_actions: Optional[str] = None
+    model_thoughts: Optional[str] = None
+    recording_path: Optional[str] = None
+    trace_file: Optional[str] = None
+    history_file: Optional[str] = None
 
 async def execute_task(task_id: str, task_request: TaskRequest):
     try:
@@ -102,10 +102,10 @@ async def execute_task(task_id: str, task_request: TaskRequest):
         # Save results with type-safe config access
         tasks_store[task_id].update({
             'status': 'completed',
-            'final_result': history.final_result(),
-            'errors': history.errors(),
-'model_actions': "\n".join(history.model_actions()) if isinstance(history.model_actions(), list) else str(history.model_actions()),
-'model_thoughts': "\n".join(history.model_thoughts()) if isinstance(history.model_thoughts(), list) else str(history.model_thoughts()),
+            'final_result': json.dumps(history.final_result()) if isinstance(history.final_result(), dict) else str(history.final_result()),
+            'errors': "\n".join(json.dumps(error) if isinstance(error, dict) else str(error) for error in history.errors()) if isinstance(history.errors(), list) else str(history.errors()),
+'model_actions': "\n".join(json.dumps(action) if isinstance(action, dict) else str(action) for action in history.model_actions()) if isinstance(history.model_actions(), list) else str(history.model_actions()),
+'model_thoughts': "\n".join(json.dumps(thought) if isinstance(thought, dict) else str(thought) for thought in history.model_thoughts()) if isinstance(history.model_thoughts(), list) else str(history.model_thoughts()),
             'recording_path': config_dict.get('save_recording_path') if config_dict.get('enable_recording') else None,
             'trace_file': config_dict.get('save_trace_path'),
             'history_file': f"{config_dict.get('save_agent_history_path', 'tmp/agent_history')}/{agent.agent_id}.json"
@@ -128,7 +128,14 @@ async def create_task(task_request: TaskRequest, background_tasks: BackgroundTas
     task_id = str(uuid.uuid4())
     tasks_store[task_id] = {
         'status': 'pending',
-        'created_at': datetime.utcnow().isoformat()
+        'created_at': datetime.utcnow().isoformat(),
+        'final_result': None,
+        'errors': None,
+        'model_actions': None,
+        'model_thoughts': None,
+        'recording_path': None,
+        'trace_file': None,
+        'history_file': None
     }
     
     background_tasks.add_task(execute_task, task_id, task_request)
