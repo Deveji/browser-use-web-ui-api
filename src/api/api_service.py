@@ -1,10 +1,12 @@
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Security
 from pydantic import BaseModel
 from typing import Optional, Dict, Any, List, cast
 import asyncio
 import uuid
 import json
 from datetime import datetime
+
+from .security.api_key import api_key_manager, get_api_key
 
 from src.utils.default_config_settings import load_config_from_file, default_config
 from src.agent.custom_agent import CustomAgent
@@ -15,7 +17,80 @@ from src.utils.agent_state import AgentState
 from browser_use.browser.browser import BrowserConfig
 from browser_use.browser.context import BrowserContext, BrowserContextConfig, BrowserContextWindowSize
 
-app = FastAPI(title="Browser Use API")
+app = FastAPI(
+    title="Browser Use API",
+    description="API for browser automation with built-in security",
+    version="1.0.0"
+)
+
+# API Key management endpoints
+class APIKeyResponse(BaseModel):
+    key: str
+    expires_at: str
+    created_at: str
+
+class APIKeyInfo(BaseModel):
+    expires_at: datetime
+    created_at: datetime
+    is_active: bool
+    last_used: Optional[datetime]
+    usage_count: int
+
+class ActiveKeysResponse(BaseModel):
+    keys: Dict[str, APIKeyInfo]
+
+@app.post("/api-keys/generate", response_model=APIKeyResponse)
+async def generate_api_key(expires_in_days: Optional[int] = 30):
+    """Generate a new API key"""
+    try:
+        key = api_key_manager.generate_key(expires_in_days)
+        key_info = api_key_manager.get_key_info(key)
+        if not key_info:
+            raise HTTPException(status_code=500, detail="Failed to generate API key")
+        
+        return APIKeyResponse(
+            key=key,
+            expires_at=key_info["expires_at"].isoformat(),
+            created_at=key_info["created_at"].isoformat()
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api-keys/rotate")
+async def rotate_api_key(current_api_key: str = Security(get_api_key)):
+    """Rotate an existing API key"""
+    try:
+        new_key = api_key_manager.rotate_key(current_api_key)
+        if not new_key:
+            raise HTTPException(status_code=400, detail="Failed to rotate API key")
+        
+        key_info = api_key_manager.get_key_info(new_key)
+        if not key_info:
+            raise HTTPException(status_code=500, detail="Failed to get new key info")
+        
+        return APIKeyResponse(
+            key=new_key,
+            expires_at=key_info["expires_at"].isoformat(),
+            created_at=key_info["created_at"].isoformat()
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api-keys/revoke")
+async def revoke_api_key(api_key: str = Security(get_api_key)):
+    """Revoke an API key"""
+    if api_key_manager.revoke_key(api_key):
+        return {"message": "API key revoked successfully"}
+    raise HTTPException(status_code=400, detail="Failed to revoke API key")
+
+@app.get("/api-keys/active", response_model=ActiveKeysResponse)
+async def list_active_keys(api_key: str = Security(get_api_key)):
+    """List all active API keys"""
+    try:
+        active_keys = api_key_manager.list_active_keys()
+        return ActiveKeysResponse(keys=active_keys)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to list active keys: {str(e)}")
 
 # Store for active tasks and their results
 tasks_store: Dict[str, Dict[str, Any]] = {}
@@ -157,7 +232,7 @@ async def execute_task(task_id: str, task_request: TaskRequest):
             if browser:
                 await browser.close()
 
-@app.post("/tasks", response_model=TaskResponse)
+@app.post("/tasks", response_model=TaskResponse, dependencies=[Depends(get_api_key)])
 async def create_task(task_request: TaskRequest, background_tasks: BackgroundTasks):
     task_id = str(uuid.uuid4())
     tasks_store[task_id] = {
@@ -181,7 +256,7 @@ async def create_task(task_request: TaskRequest, background_tasks: BackgroundTas
         created_at=tasks_store[task_id]['created_at']
     )
 
-@app.get("/tasks/{task_id}", response_model=TaskResult)
+@app.get("/tasks/{task_id}", response_model=TaskResult, dependencies=[Depends(get_api_key)])
 async def get_task_result(task_id: str):
     if task_id not in tasks_store:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -191,7 +266,7 @@ async def get_task_result(task_id: str):
         **tasks_store[task_id]
     )
 
-@app.get("/tasks", response_model=List[TaskResult])
+@app.get("/tasks", response_model=List[TaskResult], dependencies=[Depends(get_api_key)])
 async def list_tasks():
     return [
         TaskResult(task_id=task_id, **task_data)
