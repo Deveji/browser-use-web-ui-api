@@ -1,12 +1,16 @@
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Security
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends
 from pydantic import BaseModel
 from typing import Optional, Dict, Any, List, cast
-import asyncio
 import uuid
 import json
 from datetime import datetime
+import os
+from dotenv import load_dotenv
 
-from .security.api_key import api_key_manager, get_api_key
+# Load environment variables at startup
+load_dotenv()
+
+from .security.api_key import get_api_key
 
 from src.utils.default_config_settings import load_config_from_file, default_config
 from src.agent.custom_agent import CustomAgent
@@ -22,75 +26,6 @@ app = FastAPI(
     description="API for browser automation with built-in security",
     version="1.0.0"
 )
-
-# API Key management endpoints
-class APIKeyResponse(BaseModel):
-    key: str
-    expires_at: str
-    created_at: str
-
-class APIKeyInfo(BaseModel):
-    expires_at: datetime
-    created_at: datetime
-    is_active: bool
-    last_used: Optional[datetime]
-    usage_count: int
-
-class ActiveKeysResponse(BaseModel):
-    keys: Dict[str, APIKeyInfo]
-
-@app.post("/api-keys/generate", response_model=APIKeyResponse)
-async def generate_api_key(expires_in_days: Optional[int] = 30):
-    """Generate a new API key"""
-    try:
-        key = api_key_manager.generate_key(expires_in_days)
-        key_info = api_key_manager.get_key_info(key)
-        if not key_info:
-            raise HTTPException(status_code=500, detail="Failed to generate API key")
-        
-        return APIKeyResponse(
-            key=key,
-            expires_at=key_info["expires_at"].isoformat(),
-            created_at=key_info["created_at"].isoformat()
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api-keys/rotate")
-async def rotate_api_key(current_api_key: str = Security(get_api_key)):
-    """Rotate an existing API key"""
-    try:
-        new_key = api_key_manager.rotate_key(current_api_key)
-        if not new_key:
-            raise HTTPException(status_code=400, detail="Failed to rotate API key")
-        
-        key_info = api_key_manager.get_key_info(new_key)
-        if not key_info:
-            raise HTTPException(status_code=500, detail="Failed to get new key info")
-        
-        return APIKeyResponse(
-            key=new_key,
-            expires_at=key_info["expires_at"].isoformat(),
-            created_at=key_info["created_at"].isoformat()
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api-keys/revoke")
-async def revoke_api_key(api_key: str = Security(get_api_key)):
-    """Revoke an API key"""
-    if api_key_manager.revoke_key(api_key):
-        return {"message": "API key revoked successfully"}
-    raise HTTPException(status_code=400, detail="Failed to revoke API key")
-
-@app.get("/api-keys/active", response_model=ActiveKeysResponse)
-async def list_active_keys(api_key: str = Security(get_api_key)):
-    """List all active API keys"""
-    try:
-        active_keys = api_key_manager.list_active_keys()
-        return ActiveKeysResponse(keys=active_keys)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to list active keys: {str(e)}")
 
 # Store for active tasks and their results
 tasks_store: Dict[str, Dict[str, Any]] = {}
@@ -212,8 +147,8 @@ async def execute_task(task_id: str, task_request: TaskRequest):
             'status': 'completed',
             'final_result': json.dumps(history.final_result()) if isinstance(history.final_result(), dict) else str(history.final_result()),
             'errors': "\n".join(json.dumps(error) if isinstance(error, dict) else str(error) for error in history.errors()) if isinstance(history.errors(), list) else str(history.errors()),
-'model_actions': "\n".join(json.dumps(action) if isinstance(action, dict) else str(action) for action in history.model_actions()) if isinstance(history.model_actions(), list) else str(history.model_actions()),
-'model_thoughts': "\n".join(json.dumps(thought) if isinstance(thought, dict) else str(thought) for thought in history.model_thoughts()) if isinstance(history.model_thoughts(), list) else str(history.model_thoughts()),
+            'model_actions': "\n".join(json.dumps(action) if isinstance(action, dict) else str(action) for action in history.model_actions()) if isinstance(history.model_actions(), list) else str(history.model_actions()),
+            'model_thoughts': "\n".join(json.dumps(thought) if isinstance(thought, dict) else str(thought) for thought in history.model_thoughts()) if isinstance(history.model_thoughts(), list) else str(history.model_thoughts()),
             'recording_path': config_dict.get('save_recording_path') if config_dict.get('enable_recording') else None,
             'trace_file': config_dict.get('save_trace_path'),
             'history_file': f"{config_dict.get('save_agent_history_path', 'tmp/agent_history')}/{agent.agent_id}.json",
