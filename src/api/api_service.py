@@ -24,6 +24,16 @@ class TaskRequest(BaseModel):
     task: str
     add_infos: Optional[str] = ""
     config_file: Optional[str] = None  # Path to custom config file
+    # Direct configuration options
+    llm_model_name: Optional[str] = None
+    llm_provider: Optional[str] = None
+    llm_temperature: Optional[float] = None
+    llm_base_url: Optional[str] = None
+    llm_api_key: Optional[str] = None
+    max_steps: Optional[int] = None
+    max_actions_per_step: Optional[int] = None
+    use_vision: Optional[bool] = None
+    headless: Optional[bool] = None
 
 class TaskResponse(BaseModel):
     task_id: str
@@ -40,14 +50,37 @@ class TaskResult(BaseModel):
     recording_path: Optional[str] = None
     trace_file: Optional[str] = None
     history_file: Optional[str] = None
+    config: Optional[Dict[str, Any]] = None
 
 async def execute_task(task_id: str, task_request: TaskRequest):
     try:
-        # Load configuration
+        # Load base configuration
         if task_request.config_file:
             config = load_config_from_file(task_request.config_file)
+            if isinstance(config, str):  # Error case
+                raise ValueError(f"Failed to load config file: {config}")
         else:
             config = default_config()
+
+        # Ensure config is a dictionary
+        if not isinstance(config, dict):
+            raise ValueError("Invalid configuration format")
+
+        # Override with any directly specified config values
+        config_updates = {
+            k: v for k, v in {
+                'llm_model_name': task_request.llm_model_name,
+                'llm_provider': task_request.llm_provider,
+                'llm_temperature': task_request.llm_temperature,
+                'llm_base_url': task_request.llm_base_url,
+                'llm_api_key': task_request.llm_api_key,
+                'max_steps': task_request.max_steps,
+                'max_actions_per_step': task_request.max_actions_per_step,
+                'use_vision': task_request.use_vision,
+                'headless': task_request.headless
+            }.items() if v is not None
+        }
+        config.update(config_updates)
 
         # Initialize LLM with type-safe config access
         config_dict = cast(Dict[str, Any], config)
@@ -108,7 +141,8 @@ async def execute_task(task_id: str, task_request: TaskRequest):
 'model_thoughts': "\n".join(json.dumps(thought) if isinstance(thought, dict) else str(thought) for thought in history.model_thoughts()) if isinstance(history.model_thoughts(), list) else str(history.model_thoughts()),
             'recording_path': config_dict.get('save_recording_path') if config_dict.get('enable_recording') else None,
             'trace_file': config_dict.get('save_trace_path'),
-            'history_file': f"{config_dict.get('save_agent_history_path', 'tmp/agent_history')}/{agent.agent_id}.json"
+            'history_file': f"{config_dict.get('save_agent_history_path', 'tmp/agent_history')}/{agent.agent_id}.json",
+            'config': config_dict
         })
 
     except Exception as e:
@@ -135,7 +169,8 @@ async def create_task(task_request: TaskRequest, background_tasks: BackgroundTas
         'model_thoughts': None,
         'recording_path': None,
         'trace_file': None,
-        'history_file': None
+        'history_file': None,
+        'config': None
     }
     
     background_tasks.add_task(execute_task, task_id, task_request)
