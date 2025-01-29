@@ -1,0 +1,36 @@
+version: '3.8'
+services:
+  browser-use-webui:
+    image: gabrielkurowski/browser-use-web-ui-api:latest
+    container_name: browser-use-webui
+    ports:
+      - "${GRADIO_PORT:-7788}:7788"  # Gradio UI port
+      - "${API_PORT:-7789}:7789"      # FastAPI port
+      - "${NOVNC_PORT:-6080}:6080"    # noVNC web interface
+      - "${VNC_PORT:-5900}:5900"      # VNC port
+      - "${DEBUG_PORT:-9222}:9222"    # Chrome remote debugging port
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - AZURE_OPENAI_ENDPOINT=${AZURE_OPENAI_ENDPOINT:-}
+      - AZURE_OPENAI_API_KEY=${AZURE_OPENAI_API_KEY:-}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - VNC_PASSWORD=${VNC_PASSWORD:-vncpassword}
+      - BROWSER_USE_LOGGING_LEVEL=info
+      - RESOLUTION=1920x1080x24
+      - CHROME_PERSISTENT_SESSION=false
+      - MASTER_API_KEY=${MASTER_API_KEY:-}
+    volumes:
+      - browser_data:/app/data
+    restart: unless-stopped
+    shm_size: '2gb'
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - seccomp=unconfined
+    tmpfs:
+      - /tmp
+
+volumes:
+  browser_data:
